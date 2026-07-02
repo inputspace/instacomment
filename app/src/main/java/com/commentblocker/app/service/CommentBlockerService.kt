@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
@@ -13,46 +14,34 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.commentblocker.app.ui.MainActivity
 
-/**
- * Accessibility service that monitors Instagram and draws an opaque overlay
- * over the comment section area when a Reel is detected in the feed.
- *
- * Strategy:
- *  - Listen for window/content-change events from com.instagram.android
- *  - Scan the accessibility node tree for comment-related containers
- *  - If found, measure their screen position and cover them with a Window overlay
- *  - If not found (e.g. user navigated away), remove the overlay
- */
 class CommentBlockerService : AccessibilityService() {
 
     private lateinit var prefs: SharedPreferences
     private var windowManager: WindowManager? = null
-    private var overlayView: View? = null
+    private var actionBarOverlay: View? = null
+    private var commentSheetOverlay: View? = null
     private val handler = Handler(Looper.getMainLooper())
-
-    // Debounce rapid events
     private var pendingCheck: Runnable? = null
-    private val CHECK_DELAY_MS = 120L
+    private val CHECK_DELAY_MS = 100L
 
-    // Known accessibility view IDs and content descriptions used by Instagram
-    // for the comment section / comment button row on Reels.
-    private val COMMENT_VIEW_IDS = setOf(
+    private val ACTION_BAR_IDS = setOf(
         "com.instagram.android:id/clips_comment_button",
-        "com.instagram.android:id/row_comment_container",
-        "com.instagram.android:id/comment_icon",
-        "com.instagram.android:id/comments_count",
-        "com.instagram.android:id/like_count",
-        "com.instagram.android:id/action_bar_container",
+        "com.instagram.android:id/clips_viewer_right_section",
         "com.instagram.android:id/reel_viewer_comment_button",
         "com.instagram.android:id/reel_viewer_like_button_container",
-        "com.instagram.android:id/clips_viewer_right_section"
+        "com.instagram.android:id/reel_viewer_right_section",
+        "com.instagram.android:id/comment_icon",
+        "com.instagram.android:id/comments_count",
+        "com.instagram.android:id/like_count"
     )
 
-    // Container IDs that wrap the entire right-side action row on Reels
-    private val ACTION_ROW_IDS = setOf(
-        "com.instagram.android:id/clips_viewer_right_section",
-        "com.instagram.android:id/reel_viewer_right_section",
-        "com.instagram.android:id/tab_switcher_container"
+    private val COMMENT_SHEET_IDS = setOf(
+        "com.instagram.android:id/comments_recycler_view",
+        "com.instagram.android:id/comments_header_view",
+        "com.instagram.android:id/unified_comments_recycler_view",
+        "com.instagram.android:id/comment_text",
+        "com.instagram.android:id/layout_comment_thread_header",
+        "com.instagram.android:id/comments_container"
     )
 
     override fun onServiceConnected() {
@@ -63,170 +52,118 @@ class CommentBlockerService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
-        if (!isBlockingEnabled()) {
-            removeOverlay()
-            return
-        }
-
+        if (!isBlockingEnabled()) { removeAllOverlays(); return }
         val packageName = event.packageName?.toString() ?: return
-        if (packageName != "com.instagram.android") {
-            removeOverlay()
-            return
-        }
-
-        // Debounce rapid events
+        if (packageName != "com.instagram.android") { removeAllOverlays(); return }
         pendingCheck?.let { handler.removeCallbacks(it) }
-        val check = Runnable { scanAndBlock(event.source) }
+        val check = Runnable { scanAndBlock() }
         pendingCheck = check
         handler.postDelayed(check, CHECK_DELAY_MS)
     }
 
-    private fun scanAndBlock(rootNode: AccessibilityNodeInfo?) {
-        val root = rootNode ?: rootInActiveWindow ?: run {
-            removeOverlay()
-            return
-        }
-
-        // Try to find comment-related nodes
-        val commentNodes = mutableListOf<AccessibilityNodeInfo>()
-
-        for (id in COMMENT_VIEW_IDS) {
-            val found = root.findAccessibilityNodeInfosByViewId(id)
-            commentNodes.addAll(found)
-        }
-
-        if (commentNodes.isEmpty()) {
-            // Also try searching by content description (fallback)
-            val byDesc = findNodesByContentDescription(root, "Comment")
-            commentNodes.addAll(byDesc)
-        }
-
-        if (commentNodes.isNotEmpty()) {
-            // Find the bounding rect of the entire action area to cover
-            showOverlayForNodes(commentNodes)
-        } else {
-            removeOverlay()
-        }
-
-        commentNodes.forEach { it.recycle() }
-    }
-
-    private fun findNodesByContentDescription(
-        node: AccessibilityNodeInfo,
-        keyword: String
-    ): List<AccessibilityNodeInfo> {
-        val results = mutableListOf<AccessibilityNodeInfo>()
-        val desc = node.contentDescription?.toString() ?: ""
-        if (desc.contains(keyword, ignoreCase = true)) {
-            results.add(node)
-        }
-        for (i in 0 until node.childCount) {
-            val child = node.getChild(i) ?: continue
-            results.addAll(findNodesByContentDescription(child, keyword))
-        }
-        return results
-    }
-
-    private fun showOverlayForNodes(nodes: List<AccessibilityNodeInfo>) {
-        // Compute bounding rect that covers all found nodes
-        var left = Int.MAX_VALUE
-        var top = Int.MAX_VALUE
-        var right = Int.MIN_VALUE
-        var bottom = Int.MIN_VALUE
-
-        for (node in nodes) {
-            val rect = android.graphics.Rect()
-            node.getBoundsInScreen(rect)
-            if (rect.width() > 0 && rect.height() > 0) {
-                left = minOf(left, rect.left)
-                top = minOf(top, rect.top)
-                right = maxOf(right, rect.right)
-                bottom = maxOf(bottom, rect.bottom)
-            }
-        }
-
-        if (left == Int.MAX_VALUE) {
-            removeOverlay()
-            return
-        }
-
-        // Expand the overlay to cover a generous area around the comment section
-        // The comment section on Reels is typically the right-side action bar
-        // We expand it to cover the full right portion of the screen
+    private fun scanAndBlock() {
+        val root = rootInActiveWindow ?: run { removeAllOverlays(); return }
         val screenWidth = resources.displayMetrics.widthPixels
         val screenHeight = resources.displayMetrics.heightPixels
 
-        // Cover right 15% of screen height range where action buttons appear
-        // (roughly bottom 55% to bottom 10% of screen)
-        val overlayTop = (screenHeight * 0.38).toInt()
-        val overlayBottom = (screenHeight * 0.92).toInt()
-        val overlayLeft = (screenWidth * 0.72).toInt()
-        val overlayWidth = screenWidth - overlayLeft
-        val overlayHeight = overlayBottom - overlayTop
+        val sheetNodes = mutableListOf<AccessibilityNodeInfo>()
+        for (id in COMMENT_SHEET_IDS) sheetNodes.addAll(root.findAccessibilityNodeInfosByViewId(id))
 
+        if (sheetNodes.isNotEmpty()) {
+            var sheetTop = screenHeight
+            for (node in sheetNodes) {
+                val rect = Rect()
+                node.getBoundsInScreen(rect)
+                if (rect.height() > 0) sheetTop = minOf(sheetTop, rect.top)
+            }
+            sheetNodes.forEach { it.recycle() }
+            val coverTop = maxOf(0, sheetTop - 60)
+            showCommentSheetOverlay(0, coverTop, screenWidth, screenHeight - coverTop)
+            showActionBarOverlay(screenWidth, screenHeight)
+        } else {
+            sheetNodes.forEach { it.recycle() }
+            removeCommentSheetOverlay()
+            val actionNodes = mutableListOf<AccessibilityNodeInfo>()
+            for (id in ACTION_BAR_IDS) actionNodes.addAll(root.findAccessibilityNodeInfosByViewId(id))
+            if (actionNodes.isNotEmpty()) {
+                actionNodes.forEach { it.recycle() }
+                showActionBarOverlay(screenWidth, screenHeight)
+            } else {
+                actionNodes.forEach { it.recycle() }
+                removeAllOverlays()
+            }
+        }
+    }
+
+    private fun showActionBarOverlay(screenWidth: Int, screenHeight: Int) {
+        val overlayLeft = (screenWidth * 0.82).toInt()
+        val overlayTop = (screenHeight * 0.35).toInt()
+        val overlayWidth = screenWidth - overlayLeft
+        val overlayHeight = (screenHeight * 0.57).toInt()
         handler.post {
-            if (overlayView != null) {
-                // Update existing overlay position
-                val params = overlayView!!.layoutParams as? WindowManager.LayoutParams
+            val existing = actionBarOverlay
+            if (existing != null) {
+                val params = existing.layoutParams as? WindowManager.LayoutParams
                 if (params != null) {
-                    params.x = overlayLeft
-                    params.y = overlayTop
-                    params.width = overlayWidth
-                    params.height = overlayHeight
-                    try {
-                        windowManager?.updateViewLayout(overlayView, params)
-                    } catch (_: Exception) {}
+                    params.x = overlayLeft; params.y = overlayTop
+                    params.width = overlayWidth; params.height = overlayHeight
+                    try { windowManager?.updateViewLayout(existing, params) } catch (_: Exception) {}
                 }
                 return@post
             }
-
-            // Create new overlay
             val view = View(this)
-            view.setBackgroundColor(0xFF0A0A0A.toInt()) // near-black, same as Reels bg
-
+            view.setBackgroundColor(0xFF0A0A0A.toInt())
             val params = WindowManager.LayoutParams(
-                overlayWidth,
-                overlayHeight,
+                overlayWidth, overlayHeight,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                         WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.OPAQUE
-            ).apply {
-                gravity = Gravity.TOP or Gravity.START
-                x = overlayLeft
-                y = overlayTop
-            }
-
-            try {
-                windowManager?.addView(view, params)
-                overlayView = view
-            } catch (_: Exception) {}
+            ).apply { gravity = Gravity.TOP or Gravity.START; x = overlayLeft; y = overlayTop }
+            try { windowManager?.addView(view, params); actionBarOverlay = view } catch (_: Exception) {}
         }
     }
 
-    private fun removeOverlay() {
+    private fun showCommentSheetOverlay(x: Int, y: Int, width: Int, height: Int) {
         handler.post {
-            overlayView?.let {
-                try {
-                    windowManager?.removeView(it)
-                } catch (_: Exception) {}
-                overlayView = null
+            val existing = commentSheetOverlay
+            if (existing != null) {
+                val params = existing.layoutParams as? WindowManager.LayoutParams
+                if (params != null) {
+                    params.x = x; params.y = y; params.width = width; params.height = height
+                    try { windowManager?.updateViewLayout(existing, params) } catch (_: Exception) {}
+                }
+                return@post
             }
+            val view = View(this)
+            view.setBackgroundColor(0xFF0A0A0A.toInt())
+            val params = WindowManager.LayoutParams(
+                width, height,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.OPAQUE
+            ).apply { gravity = Gravity.TOP or Gravity.START; this.x = x; this.y = y }
+            try { windowManager?.addView(view, params); commentSheetOverlay = view } catch (_: Exception) {}
         }
     }
 
-    private fun isBlockingEnabled(): Boolean {
-        return prefs.getBoolean(MainActivity.KEY_BLOCKING_ENABLED, false)
+    private fun removeCommentSheetOverlay() {
+        handler.post {
+            commentSheetOverlay?.let { try { windowManager?.removeView(it) } catch (_: Exception) {}; commentSheetOverlay = null }
+        }
     }
 
-    override fun onInterrupt() {
-        removeOverlay()
+    private fun removeAllOverlays() {
+        handler.post {
+            actionBarOverlay?.let { try { windowManager?.removeView(it) } catch (_: Exception) {}; actionBarOverlay = null }
+            commentSheetOverlay?.let { try { windowManager?.removeView(it) } catch (_: Exception) {}; commentSheetOverlay = null }
+        }
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        removeOverlay()
-        handler.removeCallbacksAndMessages(null)
-    }
+    private fun isBlockingEnabled(): Boolean = prefs.getBoolean(MainActivity.KEY_BLOCKING_ENABLED, false)
+    override fun onInterrupt() = removeAllOverlays()
+    override fun onDestroy() { super.onDestroy(); removeAllOverlays(); handler.removeCallbacksAndMessages(null) }
 }
