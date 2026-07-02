@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#CC000000">
+
+    <!-- Top instruction bar -->
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#E61A1A2E"
+        android:padding="20dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Locate Comment Button"
+            android:textColor="#FFFFFF"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp"/>
+
+        <TextView
+            android:id="@+id/tvStep"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="1. Open Instagram → go to Reels\n2. Come back here\n3. Drag the circle to where the comment button is"
+            android:textColor="#CCFFFFFF"
+            android:textSize="13sp"
+            android:lineSpacingExtra="3dp"/>
+
+    </LinearLayout>
+
+    <!-- Draggable area — this IS the phone screen -->
+    <FrameLayout
+        android:id="@+id/calibrationContainer"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        app:layout_constraintTop_toBottomOf="@id/topBar"
+        app:layout_constraintBottom_toTopOf="@id/bottomBar"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <!-- Grid hint lines -->
+        <View
+            android:layout_width="1dp"
+            android:layout_height="match_parent"
+            android:layout_gravity="center_horizontal"
+            android:background="#22FFFFFF"/>
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_gravity="center_vertical"
+            android:background="#22FFFFFF"/>
+
+        <!-- Corner labels to orient the user -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="TOP"
+            android:textColor="#33FFFFFF"
+            android:textSize="11sp"
+            android:layout_gravity="top|center_horizontal"
+            android:layout_marginTop="8dp"/>
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="BOTTOM"
+            android:textColor="#33FFFFFF"
+            android:textSize="11sp"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="8dp"/>
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="LEFT"
+            android:textColor="#33FFFFFF"
+            android:textSize="11sp"
+            android:layout_gravity="center_vertical|start"
+            android:layout_marginStart="8dp"/>
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="RIGHT"
+            android:textColor="#33FFFFFF"
+            android:textSize="11sp"
+            android:layout_gravity="center_vertical|end"
+            android:layout_marginEnd="8dp"/>
+
+        <!-- Draggable handle — the pink dot -->
+        <View
+            android:id="@+id/dragHandle"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:background="@drawable/calibration_dot"
+            android:elevation="8dp"/>
+
+    </FrameLayout>
+
+    <!-- Bottom bar with Save/Cancel -->
+    <LinearLayout
+        android:id="@+id/bottomBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:background="#E61A1A2E"
+        android:padding="16dp"
+        android:gravity="center"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnCancel"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:text="Cancel"
+            android:textColor="#AAFFFFFF"
+            app:backgroundTint="#33FFFFFF"
+            app:cornerRadius="12dp"
+            android:layout_marginEnd="8dp"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnSave"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:text="Lock In Position"
+            android:textColor="#FFFFFF"
+            app:backgroundTint="#E94560"
+            app:cornerRadius="12dp"
+            android:layout_marginStart="8dp"/>
+
+    </LinearLayout>
+
+</androidx.constraintlayout.widget.ConstraintLayout>
